@@ -88,6 +88,7 @@ Other recommended projects:<br>
 
 - Python >= 3.7 (Recommend to use [Anaconda](https://www.anaconda.com/download/#linux) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html))
 - [PyTorch >= 1.7](https://pytorch.org/)
+- `ffmpeg` in your `PATH` if you plan to use `inference_realesrgan_video.py`
 
 ### Installation
 
@@ -173,60 +174,142 @@ Note that it may introduce block inconsistency (and also generate slightly diffe
 
 ### Python script
 
-#### Usage of python script
+Real-ESRGAN provides two Python entry points:
 
-1. You can use X4 model for **arbitrary output size** with the argument `outscale`. The program will further perform cheap resize operation after the Real-ESRGAN output.
+- `inference_realesrgan.py`: restore a single image or a folder of images
+- `inference_realesrgan_video.py`: restore a video, image sequence, or folder
+
+The scripts download missing model weights to `weights/` automatically. By default, they also pick the best available device automatically:
+
+- CUDA first on Nvidia GPUs
+- MPS on Apple Silicon / Metal
+- CPU as the final fallback
+
+`--fp32` forces fp32 on CUDA. On non-CUDA devices, fp32 is used automatically when half precision is not supported.
+
+#### Common model choices
+
+- `RealESRGAN_x4plus`: general photos and real-world images
+- `RealESRGAN_x4plus_anime_6B`: anime and illustrations
+- `RealESRGAN_x2plus`: general 2x upscaling
+- `realesr-general-x4v3`: lightweight general model with denoise control via `-dn`
+- `realesr-animevideov3`: anime video model
+
+#### Image inference: `inference_realesrgan.py`
+
+Use this script for a single image or a folder of images.
 
 ```console
-Usage: python inference_realesrgan.py -n RealESRGAN_x4plus -i infile -o outfile [options]...
+Usage: python inference_realesrgan.py -i INPUT [options]
 
-A common command: python inference_realesrgan.py -n RealESRGAN_x4plus -i infile --outscale 3.5 --face_enhance
+Example:
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results --outscale 3.5
 
-  -h                   show this help
-  -i --input           Input image or folder. Default: inputs
-  -o --output          Output folder. Default: results
-  -n --model_name      Model name. Default: RealESRGAN_x4plus
-  -s, --outscale       The final upsampling scale of the image. Default: 4
-  --suffix             Suffix of the restored image. Default: out
-  -t, --tile           Tile size, 0 for no tile during testing. Default: 0
-  --face_enhance       Whether to use GFPGAN to enhance face. Default: False
-  --fp32               Use fp32 precision during inference. Default: fp16 (half precision).
-  --ext                Image extension. Options: auto | jpg | png, auto means using the same extension as inputs. Default: auto
+Main options:
+  -i, --input             Input image or folder. Default: inputs
+  -o, --output            Output folder. Default: results
+  -n, --model_name        Model name. Default: RealESRGAN_x4plus
+  --model_path            Custom model path. If omitted, weights are downloaded automatically
+  -s, --outscale          Final output scale after restoration. Default: 4
+  -dn, --denoise_strength Denoise strength for realesr-general-x4v3. 0 keeps more noise, 1 denoises more
+  --suffix                Suffix added to output filenames. Default: out
+  -t, --tile              Tile size. Use >0 for large images or limited VRAM/RAM
+  --tile_pad              Extra overlap between tiles. Default: 10
+  --pre_pad               Border padding before inference. Default: 0
+  --face_enhance          Enable GFPGAN face enhancement
+  --fp32                  Force fp32 inference instead of fp16 on CUDA
+  --alpha_upsampler       Alpha upsampler: realesrgan | bicubic
+  --ext                   Output extension: auto | jpg | png
+  -g, --gpu-id            CUDA GPU index on multi-GPU machines
 ```
 
-#### Inference general images
-
-Download pre-trained models: [RealESRGAN_x4plus.pth](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth)
+Example commands:
 
 ```bash
-wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -P weights
+# Restore a single photo with the default general x4 model
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results
+
+# Restore every image in a folder and resize the final output to 3.5x
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs -o results --outscale 3.5
+
+# Use the anime model for illustrations
+python inference_realesrgan.py -n RealESRGAN_x4plus_anime_6B -i inputs/OST_009.png -o results
+
+# Use the lightweight general model with lighter denoising
+python inference_realesrgan.py -n realesr-general-x4v3 -i inputs/00003.png -o results -dn 0.3
+
+# Split a large image into tiles to reduce memory usage
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/00003.png -o results -t 512 --tile_pad 32
+
+# Restore a portrait and run GFPGAN face enhancement
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results --face_enhance
 ```
 
-Inference!
+What the main parameters do:
+
+- `--outscale`: lets you keep the model quality but save at another final scale such as `2`, `3.5`, or `4`
+- `-t/--tile`: helps when you hit CUDA out-of-memory or when processing very large images
+- `-dn/--denoise_strength`: only applies to `realesr-general-x4v3`
+- `--face_enhance`: runs GFPGAN on detected faces and uses Real-ESRGAN for the background
+- `--alpha_upsampler bicubic`: faster for transparent PNGs if you do not need the alpha channel restored by the model
+
+Outputs are written to `results/` by default. For example, `0014.jpg` becomes `results/0014_out.jpg` unless you change `--suffix`.
+
+#### Video inference: `inference_realesrgan_video.py`
+
+Use this script for `.mp4`, `.mov`, `.mkv`, frame folders, or other video-like inputs supported by `ffmpeg`.
+
+```console
+Usage: python inference_realesrgan_video.py -i INPUT [options]
+
+Example:
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results
+
+Main options:
+  -i, --input             Input video, image, or folder
+  -o, --output            Output folder. Default: results
+  -n, --model_name        Model name. Default: realesr-animevideov3
+  -s, --outscale          Final output scale. Default: 4
+  -dn, --denoise_strength Denoise strength for realesr-general-x4v3
+  --suffix                Suffix added to output video filename. Default: out
+  -t, --tile              Tile size for each frame
+  --tile_pad              Tile overlap. Default: 10
+  --pre_pad               Border padding. Default: 0
+  --face_enhance          Enable GFPGAN on each frame
+  --fp32                  Force fp32 inference instead of fp16 on CUDA
+  --fps                   Override output FPS. Default: keep source FPS
+  --ffmpeg_bin            ffmpeg binary path. Default: ffmpeg
+  --extract_frame_first   Decode the video to frames first, then process them
+  --num_process_per_gpu   Worker processes per CUDA GPU. Default: 1
+```
+
+Example commands:
 
 ```bash
-python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs --face_enhance
+# Upscale an anime video with the default anime video model
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results
+
+# Restore a general video with the x4 model and tiling
+python inference_realesrgan_video.py -n RealESRGAN_x4plus -i inputs/video/onepiece_demo.mp4 -o results -t 256
+
+# Use the lightweight general model and keep more texture by lowering denoise strength
+python inference_realesrgan_video.py -n realesr-general-x4v3 -i inputs/video/onepiece_demo.mp4 -o results -dn 0.2
+
+# Run face enhancement and set the output FPS explicitly
+python inference_realesrgan_video.py -n RealESRGAN_x4plus -i inputs/video/onepiece_demo.mp4 -o results --face_enhance --fps 24
+
+# Point to a custom ffmpeg binary when ffmpeg is not on PATH
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results --ffmpeg_bin /usr/local/bin/ffmpeg
 ```
 
-Results are in the `results` folder
+What the main video parameters do:
 
-#### Inference anime images
+- `--fps`: overrides the output frame rate while keeping the restored frames
+- `--extract_frame_first`: useful when direct video piping is unstable on a specific system, at the cost of extra disk usage
+- `--num_process_per_gpu`: increases parallelism on CUDA systems; it is not needed on MPS or CPU
+- `-t/--tile`: the first setting to adjust if a single video frame is too large for available memory
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/xinntao/public-figures/master/Real-ESRGAN/cmp_realesrgan_anime_1.png">
-</p>
-
-Pre-trained models: [RealESRGAN_x4plus_anime_6B](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth)<br>
- More details and comparisons with [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan) are in [**anime_model.md**](docs/anime_model.md)
-
-```bash
-# download model
-wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth -P weights
-# inference
-python inference_realesrgan.py -n RealESRGAN_x4plus_anime_6B -i inputs
-```
-
-Results are in the `results` folder
+Output videos are written to `results/` by default. For example, `onepiece_demo.mp4` becomes `results/onepiece_demo_out.mp4`.
 
 ---
 

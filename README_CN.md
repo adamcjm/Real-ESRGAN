@@ -165,6 +165,7 @@ Usage: realesrgan-ncnn-vulkan.exe -i infile -o outfile [options]...
 
 - Python >= 3.7 (推荐使用[Anaconda](https://www.anaconda.com/download/#linux)或[Miniconda](https://docs.conda.io/en/latest/miniconda.html))
 - [PyTorch >= 1.7](https://pytorch.org/)
+- 如果要使用 `inference_realesrgan_video.py`，需要保证 `ffmpeg` 在 `PATH` 中
 
 #### 安装
 
@@ -190,60 +191,142 @@ Usage: realesrgan-ncnn-vulkan.exe -i infile -o outfile [options]...
 
 ## :zap: 快速上手
 
-### 普通图片
+Real-ESRGAN 提供两个 Python 入口脚本：
 
-下载我们训练好的模型: [RealESRGAN_x4plus.pth](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth)
+- `inference_realesrgan.py`：处理单张图片或图片文件夹
+- `inference_realesrgan_video.py`：处理视频、序列帧或文件夹
 
-```bash
-wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -P weights
-```
+脚本会在需要时自动把缺失的模型下载到 `weights/`。默认也会自动选择当前机器上最合适的推理设备：
 
-推断!
+- 优先使用 Nvidia GPU 的 CUDA
+- Apple Silicon / Metal 环境使用 MPS
+- 最后回退到 CPU
 
-```bash
-python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs --face_enhance
-```
+`--fp32` 可以在 CUDA 上强制使用 fp32；如果当前设备不支持 half precision，程序会自动回退到 fp32。
 
-结果在`results`文件夹
+### 常用模型
 
-### 动画图片
+- `RealESRGAN_x4plus`：通用照片、真实场景图片
+- `RealESRGAN_x4plus_anime_6B`：动漫、插画、二次元图片
+- `RealESRGAN_x2plus`：通用 2 倍放大
+- `realesr-general-x4v3`：更轻量的通用模型，可通过 `-dn` 调整去噪强度
+- `realesr-animevideov3`：动漫视频模型
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/xinntao/public-figures/master/Real-ESRGAN/cmp_realesrgan_anime_1.png">
-</p>
+### 图片推理：`inference_realesrgan.py`
 
-训练好的模型: [RealESRGAN_x4plus_anime_6B](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth)<br>
-有关[waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan)的更多信息和对比在[**anime_model.md**](docs/anime_model.md)中。
-
-```bash
-# 下载模型
-wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth -P weights
-# 推断
-python inference_realesrgan.py -n RealESRGAN_x4plus_anime_6B -i inputs
-```
-
-结果在`results`文件夹
-
-### Python 脚本的用法
-
-1. 虽然你使用了 X4 模型，但是你可以 **输出任意尺寸比例的图片**，只要实用了 `outscale` 参数. 程序会进一步对模型的输出图像进行缩放。
+这个脚本用于处理单张图片或图片文件夹。
 
 ```console
-Usage: python inference_realesrgan.py -n RealESRGAN_x4plus -i infile -o outfile [options]...
+Usage: python inference_realesrgan.py -i INPUT [options]
 
-A common command: python inference_realesrgan.py -n RealESRGAN_x4plus -i infile --outscale 3.5 --face_enhance
+示例：
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results --outscale 3.5
 
-  -h                   show this help
-  -i --input           Input image or folder. Default: inputs
-  -o --output          Output folder. Default: results
-  -n --model_name      Model name. Default: RealESRGAN_x4plus
-  -s, --outscale       The final upsampling scale of the image. Default: 4
-  --suffix             Suffix of the restored image. Default: out
-  -t, --tile           Tile size, 0 for no tile during testing. Default: 0
-  --face_enhance       Whether to use GFPGAN to enhance face. Default: False
-  --fp32               Whether to use half precision during inference. Default: False
-  --ext                Image extension. Options: auto | jpg | png, auto means using the same extension as inputs. Default: auto
+主要参数：
+  -i, --input             输入图片或文件夹。默认：inputs
+  -o, --output            输出目录。默认：results
+  -n, --model_name        模型名称。默认：RealESRGAN_x4plus
+  --model_path            自定义模型路径；不传时会自动下载权重
+  -s, --outscale          最终输出缩放倍率。默认：4
+  -dn, --denoise_strength realesr-general-x4v3 专用去噪强度；0 保留更多噪点，1 去噪更强
+  --suffix                输出文件名后缀。默认：out
+  -t, --tile              分块大小；大图或显存/内存不足时建议设置为大于 0
+  --tile_pad              分块之间的重叠像素。默认：10
+  --pre_pad               推理前的边缘 padding。默认：0
+  --face_enhance          启用 GFPGAN 人脸增强
+  --fp32                  在 CUDA 上强制使用 fp32，而不是 fp16
+  --alpha_upsampler       Alpha 通道放大方式：realesrgan | bicubic
+  --ext                   输出扩展名：auto | jpg | png
+  -g, --gpu-id            多张 CUDA 显卡时指定 GPU 编号
 ```
+
+命令行示例：
+
+```bash
+# 使用默认通用 x4 模型处理单张照片
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results
+
+# 处理整个文件夹，并把最终输出缩放到 3.5 倍
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs -o results --outscale 3.5
+
+# 使用动漫模型处理插画
+python inference_realesrgan.py -n RealESRGAN_x4plus_anime_6B -i inputs/OST_009.png -o results
+
+# 使用轻量通用模型，并降低去噪强度以保留更多纹理
+python inference_realesrgan.py -n realesr-general-x4v3 -i inputs/00003.png -o results -dn 0.3
+
+# 大图分块处理，降低显存或内存压力
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/00003.png -o results -t 512 --tile_pad 32
+
+# 处理人像并启用人脸增强
+python inference_realesrgan.py -n RealESRGAN_x4plus -i inputs/0014.jpg -o results --face_enhance
+```
+
+主要参数的使用建议：
+
+- `--outscale`：可以输出 `2`、`3.5`、`4` 等任意最终倍率
+- `-t/--tile`：大图爆显存或爆内存时优先调这个参数
+- `-dn/--denoise_strength`：只对 `realesr-general-x4v3` 生效
+- `--face_enhance`：会用 GFPGAN 处理检测到的人脸，背景仍由 Real-ESRGAN 处理
+- `--alpha_upsampler bicubic`：透明 PNG 如果更关注速度，可以用它来处理 alpha 通道
+
+输出默认写到 `results/`。例如 `0014.jpg` 默认会变成 `results/0014_out.jpg`，除非你修改了 `--suffix`。
+
+### 视频推理：`inference_realesrgan_video.py`
+
+这个脚本用于处理视频、序列帧或图片文件夹，底层依赖 `ffmpeg`。
+
+```console
+Usage: python inference_realesrgan_video.py -i INPUT [options]
+
+示例：
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results
+
+主要参数：
+  -i, --input             输入视频、图片或文件夹
+  -o, --output            输出目录。默认：results
+  -n, --model_name        模型名称。默认：realesr-animevideov3
+  -s, --outscale          最终输出缩放倍率。默认：4
+  -dn, --denoise_strength realesr-general-x4v3 专用去噪强度
+  --suffix                输出视频文件名后缀。默认：out
+  -t, --tile              每帧的分块大小
+  --tile_pad              分块之间的重叠像素。默认：10
+  --pre_pad               推理前的边缘 padding。默认：0
+  --face_enhance          对每一帧启用 GFPGAN 人脸增强
+  --fp32                  在 CUDA 上强制使用 fp32，而不是 fp16
+  --fps                   指定输出 FPS；默认沿用原视频 FPS
+  --ffmpeg_bin            ffmpeg 可执行文件路径。默认：ffmpeg
+  --extract_frame_first   先把视频拆成帧再处理
+  --num_process_per_gpu   每张 CUDA 显卡的并行进程数。默认：1
+```
+
+命令行示例：
+
+```bash
+# 使用默认动漫视频模型处理视频
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results
+
+# 使用通用 x4 模型处理视频，并启用分块
+python inference_realesrgan_video.py -n RealESRGAN_x4plus -i inputs/video/onepiece_demo.mp4 -o results -t 256
+
+# 使用轻量通用模型，并降低去噪强度以保留更多纹理
+python inference_realesrgan_video.py -n realesr-general-x4v3 -i inputs/video/onepiece_demo.mp4 -o results -dn 0.2
+
+# 启用人脸增强，并显式指定输出帧率
+python inference_realesrgan_video.py -n RealESRGAN_x4plus -i inputs/video/onepiece_demo.mp4 -o results --face_enhance --fps 24
+
+# 如果 ffmpeg 不在 PATH 中，可以手动指定路径
+python inference_realesrgan_video.py -n realesr-animevideov3 -i inputs/video/onepiece_demo.mp4 -o results --ffmpeg_bin /usr/local/bin/ffmpeg
+```
+
+视频参数的使用建议：
+
+- `--fps`：用于覆盖输出视频帧率
+- `--extract_frame_first`：当某些平台直接管道处理不稳定时很有用，但会占用更多磁盘空间
+- `--num_process_per_gpu`：主要给 CUDA 多进程并行使用，MPS 和 CPU 一般不需要调整
+- `-t/--tile`：单帧分辨率太大时，优先调这个参数
+
+输出默认写到 `results/`。例如 `onepiece_demo.mp4` 默认会变成 `results/onepiece_demo_out.mp4`。
 
 ## :european_castle: 模型库
 
