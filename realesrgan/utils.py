@@ -11,6 +11,22 @@ from torch.nn import functional as F
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def is_mps_available():
+    """Return whether PyTorch can use the Apple Metal backend."""
+    return hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+
+
+def select_device(gpu_id=None):
+    """Select the best available inference device: CUDA, then MPS, then CPU."""
+    if torch.cuda.is_available():
+        if gpu_id is not None:
+            return torch.device(f'cuda:{gpu_id}')
+        return torch.device('cuda')
+    if is_mps_available():
+        return torch.device('mps')
+    return torch.device('cpu')
+
+
 class RealESRGANer():
     """A helper class for upsampling images with RealESRGAN.
 
@@ -45,11 +61,10 @@ class RealESRGANer():
         self.half = half
 
         # initialize model
-        if gpu_id:
-            self.device = torch.device(
-                f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu') if device is None else device
-        else:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else device
+        self.device = select_device(gpu_id) if device is None else torch.device(device)
+        if self.half and self.device.type != 'cuda':
+            print(f'Half precision is only enabled for CUDA. Using fp32 on {self.device}.')
+            self.half = False
 
         if isinstance(model_path, list):
             # dni

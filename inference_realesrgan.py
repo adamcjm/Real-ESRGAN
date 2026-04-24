@@ -122,7 +122,8 @@ def main():
             upscale=args.outscale,
             arch='clean',
             channel_multiplier=2,
-            bg_upsampler=upsampler)
+            bg_upsampler=upsampler,
+            device=upsampler.device)
     os.makedirs(args.output, exist_ok=True)
 
     if os.path.isfile(args.input):

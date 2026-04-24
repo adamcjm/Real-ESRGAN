@@ -8,6 +8,23 @@ tmp/*
 weights/*
 
 version.py
+.DS_Store
+.idea/
+
+# Keep the original tracked sample inputs, ignore newly added local inputs.
+/inputs/*
+!/inputs/00003.png
+!/inputs/00017_gray.png
+!/inputs/0014.jpg
+!/inputs/0030.jpg
+!/inputs/ADE_val_00000114.jpg
+!/inputs/OST_009.png
+!/inputs/children-alpha.png
+!/inputs/tree_alpha_16bit.png
+!/inputs/wolf_gray.jpg
+!/inputs/video/
+/inputs/video/*
+!/inputs/video/onepiece_demo.mp4
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

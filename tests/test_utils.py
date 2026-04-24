@@ -28,7 +28,7 @@ def test_realesrganer():
         half=True)
     # test attribute
     assert isinstance(restorer.model, RRDBNet)
-    assert restorer.half is True
+    assert restorer.half is (restorer.device.type == 'cuda')
 
     # ------------------ test pre_process ---------------- #
     img = np.random.random((12, 12, 3)).astype(np.float32)
